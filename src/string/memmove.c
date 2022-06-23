@@ -1,5 +1,31 @@
 #include <string.h>
 #include <stdint.h>
+#include <stdio.h>
+
+#ifdef __CHERI_PURE_CAPABILITY__
+
+#define __CAP_SIZE	(_MIPS_SZCAP/8)
+
+void *memcpy_reverse (void *__restrict, const void *__restrict, size_t);
+
+void *memmove(void *dest, const void *src, size_t n)
+{
+	char *d = dest;
+	const char *s = src;
+
+	//pr_debug("MEMMOVE\n");
+
+	if (d == s) return d;
+
+	if (d < s) {
+		return memcpy(d, s, n);
+	} else {
+		return memcpy_reverse(d, s, n);
+	}
+	return dest;
+}
+
+#else
 
 #ifdef __GNUC__
 typedef __attribute__((__may_alias__)) size_t WT;
@@ -40,3 +66,4 @@ void *memmove(void *dest, const void *src, size_t n)
 
 	return dest;
 }
+#endif

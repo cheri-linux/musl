@@ -20,10 +20,14 @@
 #include <dlfcn.h>
 #include <semaphore.h>
 #include <sys/membarrier.h>
+#include <endian.h>
+
 #include "pthread_impl.h"
 #include "libc.h"
 #include "dynlink.h"
 #include "malloc_impl.h"
+#include <stdbool.h>
+#include <elf.h>
 
 static void error(const char *, ...);
 
@@ -89,6 +93,8 @@ struct dso {
 	struct td_index *td_index;
 	struct dso *fini_next;
 	char *shortname;
+	struct capreloc *start_cap_relocs;
+	size_t cap_relocs_sz;
 #if DL_FDPIC
 	unsigned char *base;
 #else
@@ -107,7 +113,11 @@ struct symdef {
 	struct dso *dso;
 };
 
+#ifndef __CHERI_PURE_CAPABILITY__
 typedef void (*stage3_func)(size_t *, size_t *);
+#else
+typedef void (*stage3_func)(__start_params_t *);
+#endif
 
 static struct builtin_tls {
 	char c;
@@ -154,6 +164,30 @@ extern hidden void (*const __init_array_end)(void), (*const __fini_array_end)(vo
 weak_alias(__init_array_start, __init_array_end);
 weak_alias(__fini_array_start, __fini_array_end);
 
+#ifdef __CHERI_PURE_CAPABILITY__
+void cheri_print_cap(const char *msg, const void * __capability cap)
+{
+	unsigned long c_perms, c_otype, c_base, c_length, c_offset;
+	unsigned int ctag, c_sealed;
+
+	ctag = cheri_gettag(cap);
+	c_sealed = cheri_getsealed(cap);
+	c_perms = cheri_getperm(cap);
+	c_otype = cheri_gettype(cap);
+	c_base = cheri_getbase(cap);
+	c_length = cheri_getlen(cap);
+	c_offset = cheri_getoffset(cap);
+	pr_info("%sv:%u s:%u p:%08lx b:%016lx l:%016lx o:%lx t:%s%lx, %lx\n",
+		msg, ctag, c_sealed, c_perms, c_base, c_length, c_offset,
+		(c_otype == - 1 ? "-" : ""), (c_otype == -1 ? 1 : c_otype), (long)cap);
+}
+#else
+void cheri_print_cap(const char *msg, const void *cap)
+{
+	pr_info("%s%#lx\n", msg, cap);
+}
+#endif
+
 static int dl_strcmp(const char *l, const char *r)
 {
 	for (; *l==*r && *l; l++, r++);
@@ -196,7 +230,11 @@ static void (*fdbarrier(void *p))()
 #else
 #define laddr(p, v) (void *)((p)->base + (v))
 #define laddr_pg(p, v) laddr(p, v)
+#ifdef __CHERI_PURE_CAPABILITY__
+#define fpaddr(p, v) ((void (*)())(cheri_codeptr_long(cheri_getaddress((p)->base) + (v), -1)))
+#else
 #define fpaddr(p, v) ((void (*)())laddr(p, v))
+#endif
 #endif
 
 static void decode_vec(size_t *v, size_t *a, size_t cnt)
@@ -343,9 +381,12 @@ static void do_relocs(struct dso *dso, size_t *rel, size_t rel_size, size_t stri
 	struct symdef def;
 	size_t *reloc_addr;
 	size_t sym_val;
+	void *sym_val_p;
 	size_t tls_val;
 	size_t addend;
 	int skip_relative = 0, reuse_addends = 0, save_slot = 0;
+
+	//pr_debug_cap("rel", rel);
 
 	if (dso == &ldso) {
 		/* Only ldso's REL table needs addend saving/reuse. */
@@ -403,7 +444,8 @@ static void do_relocs(struct dso *dso, size_t *rel, size_t rel_size, size_t stri
 			def.dso = dso;
 		}
 
-		sym_val = def.sym ? (size_t)laddr(def.dso, def.sym->st_value) : 0;
+		sym_val_p = def.sym ? laddr(def.dso, def.sym->st_value) : 0;
+		sym_val = (size_t)sym_val_p;
 		tls_val = def.sym ? def.sym->st_value : 0;
 
 		if ((type == REL_TPOFF || type == REL_TPOFF_NEG)
@@ -423,7 +465,7 @@ static void do_relocs(struct dso *dso, size_t *rel, size_t rel_size, size_t stri
 			*reloc_addr = sym_val + addend;
 			break;
 		case REL_USYMBOLIC:
-			memcpy(reloc_addr, &(size_t){sym_val + addend}, sizeof(size_t));
+			memcpy(reloc_addr, (char*)sym_val_p + addend, sizeof(size_t));
 			break;
 		case REL_RELATIVE:
 			*reloc_addr = (size_t)base + addend;
@@ -433,7 +475,7 @@ static void do_relocs(struct dso *dso, size_t *rel, size_t rel_size, size_t stri
 			else *reloc_addr = (size_t)base + addend;
 			break;
 		case REL_COPY:
-			memcpy(reloc_addr, (void *)sym_val, sym->st_size);
+			memcpy(reloc_addr, sym_val_p, sym->st_size);
 			break;
 		case REL_OFFSET32:
 			*(uint32_t *)reloc_addr = sym_val + addend
@@ -500,9 +542,38 @@ static void do_relocs(struct dso *dso, size_t *rel, size_t rel_size, size_t stri
 			reloc_addr[1] = tmp;
 #endif
 			break;
+#ifdef __CHERI_PURE_CAPABILITY__
+#ifdef __mips
+		case R_MIPS_CHERI_CAPABILITY:
+			//pr_debug("relocation at %#lx, sym: %d, val: %#lx\n", rel[0], sym_index, sym_val);
+			*(void**)reloc_addr = sym_val_p; //cheri_long(sym_val, -1);
+			//pr_debug_cap("cap: ", *(void**)reloc_addr);
+			break;
+		case R_MIPS_CHERI_CAPABILITY_CALL:
+			//pr_debug("relocation at %#lx, sym: %d, val: %#lx\n", rel[0], sym_index, sym_val);
+			*(void**)reloc_addr = sym_val_p; //cheri_codeptr_long(sym_val, -1);
+			//pr_debug_cap("cap: ", *(void**)reloc_addr);
+			break;
+#endif
+#ifdef __riscv
+		case R_RISCV_CHERI_CAPABILITY:
+			if ((sym->st_info&0xf) == STT_FUNC)
+				*(void**)reloc_addr = def.sym ? fpaddr(def.dso, def.sym->st_value) : 0;
+			else
+				*(void**)reloc_addr = sym_val_p;
+			break;
+#endif
+#endif
 		default:
+#ifdef __CHERI_PURE_CAPABILITY__
+			// cannot use error, which uses errno
+			pr_info("Error relocating %s: unsupported relocation type %d at %#lx\n",
+				dso->name, type, rel[0]);
+			__builtin_trap();
+#else
 			error("Error relocating %s: unsupported relocation type %d",
 				dso->name, type);
+#endif
 			if (runtime) longjmp(*rtld_fail, 1);
 			continue;
 		}
@@ -617,6 +688,7 @@ static void *map_library(int fd, struct dso *dso)
 	size_t dyn=0;
 	size_t tls_image=0;
 	size_t i;
+
 
 	ssize_t l = read(fd, buf, sizeof buf);
 	eh = buf;
@@ -761,7 +833,8 @@ static void *map_library(int fd, struct dso *dso)
 		if (ph->p_memsz > ph->p_filesz && (ph->p_flags&PF_W)) {
 			size_t brk = (size_t)base+ph->p_vaddr+ph->p_filesz;
 			size_t pgbrk = brk+PAGE_SIZE-1 & -PAGE_SIZE;
-			memset((void *)brk, 0, pgbrk-brk & PAGE_SIZE-1);
+			//pr_debug(_CHERI_PRINT_PTR_FMT(cheri_long(brk, sizeof(size_t))));
+			memset(cast_to_ptr(void, brk, sizeof(size_t)), 0, pgbrk-brk & PAGE_SIZE-1);
 			if (pgbrk-(size_t)base < this_max && mmap_fixed((void *)pgbrk, (size_t)base+this_max-pgbrk, prot, MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS, -1, 0) == MAP_FAILED)
 				goto error;
 		}
@@ -778,6 +851,7 @@ done_mapping:
 	dso->dynv = laddr(dso, dyn);
 	if (dso->tls.size) dso->tls.image = laddr(dso, tls_image);
 	free(allocated_buf);
+	pr_debug("map_library: name=%s, base=%lx, map=%lx\n", dso->name, (long)base, (long)map);
 	return map;
 noexec:
 	errno = ENOEXEC;
@@ -908,6 +982,12 @@ static void decode_dyn(struct dso *p)
 		p->ghashtab = laddr(p, *dyn);
 	if (search_vec(p->dynv, dyn, DT_VERSYM))
 		p->versym = laddr(p, *dyn);
+#ifdef __CHERI_PURE_CAPABILITY__
+	if (search_vec(p->dynv, dyn, DT_MIPS_CHERI___CAPRELOCS))
+		p->start_cap_relocs = laddr(p, *dyn);
+	if (search_vec(p->dynv, dyn, DT_MIPS_CHERI___CAPRELOCSSZ))
+		p->cap_relocs_sz = *dyn;
+#endif
 }
 
 static size_t count_syms(struct dso *p)
@@ -931,14 +1011,18 @@ static size_t count_syms(struct dso *p)
 
 static void *dl_mmap(size_t n)
 {
-	void *p;
+	long p;
 	int prot = PROT_READ|PROT_WRITE, flags = MAP_ANONYMOUS|MAP_PRIVATE;
+	pr_debug("dl_mmap\n");
 #ifdef SYS_mmap2
-	p = (void *)__syscall(SYS_mmap2, 0, n, prot, flags, -1, 0);
+	p = __syscall(SYS_mmap2, 0, n, prot, flags, -1, 0);
 #else
-	p = (void *)__syscall(SYS_mmap, 0, n, prot, flags, -1, 0);
+	p = __syscall(SYS_mmap, 0, n, prot, flags, -1, 0);
 #endif
-	return (unsigned long)p > -4096UL ? 0 : p;
+	if ((unsigned long)p > -4096UL)
+		return 0;
+	return cast_to_ptr(void, p, len);
+
 }
 
 static void makefuncdescs(struct dso *p)
@@ -980,6 +1064,8 @@ static struct dso *load_library(const char *name, struct dso *needed_by)
 	size_t alloc_size;
 	int n_th = 0;
 	int is_self = 0;
+
+	pr_debug("load_library: name=%s\n", name);
 
 	if (!*name) {
 		errno = EINVAL;
@@ -1164,6 +1250,9 @@ static struct dso *load_library(const char *name, struct dso *needed_by)
 	p->prev = tail;
 	tail = p;
 
+	pr_debug("load_library: name=%s, base=%llx\n", p->name, (long)p->base);
+	//pr_debug(_CHERI_PRINT_PTR_FMT(p->base));
+
 	if (DL_FDPIC) makefuncdescs(p);
 
 	if (ldd_mode) dprintf(1, "\t%s => %s (%p)\n", name, pathname, p->base);
@@ -1320,19 +1409,61 @@ static void do_mips_relocs(struct dso *p, size_t *got)
 	}
 }
 
+static void print_vec(size_t *v, size_t cnt)
+{
+	int i;
+	for (i = 0; i < cnt; i++)
+		pr_debug("%lx\t%lx\n", i, v[i]);
+}
+
+#ifdef __CHERI_PURE_CAPABILITY__
+
+#define DYNLINK
+
+#include "cheri.h"
+
+static void reloc_cap_table(struct dso *p)
+{
+	__start_params_t caps;
+	caps.base = (long)p->base;
+	caps.start_cap_relocs = p->start_cap_relocs;
+	caps.stop_cap_relocs = __builtin_cheri_offset_increment(p->start_cap_relocs, p->cap_relocs_sz);
+
+	crt_init_globals(p->phdr, p->phnum, &caps);
+}
+
+#endif
+
 static void reloc_all(struct dso *p)
 {
 	size_t dyn[DYN_CNT];
 	for (; p; p=p->next) {
 		if (p->relocated) continue;
+		pr_debug("reloc_all: %s\n", p->name);
+#ifdef __CHERI_PURE_CAPABILITY__
+		/*
+		 * TODO: here we do the relocation for __cap_relocs for all dynamiclly
+		 * loaded libraries that application depends, which include libc.so as
+		 * well, which cause relocating libc again (it was relocated already
+		 * when running _dlstart_c). Optimize the code to not relocate again
+		 * something like this:
+		 *
+		 * if (strncmp(p->name, "libc.so", 7)!=0 &&
+		 *	strncmp(p->name, "/cheri/lib/ld-musl-mips64-sf.so.1",33)!=0 &&
+		 *	strncmp(p->name, "/bin/sh",7))
+		 *	reloc_cap_table(p);
+		 */
+			reloc_cap_table(p);
+#endif
 		decode_vec(p->dynv, dyn, DYN_CNT);
+		//print_vec(dyn, DYN_CNT);
 		if (NEED_MIPS_GOT_RELOCS)
 			do_mips_relocs(p, laddr(p, dyn[DT_PLTGOT]));
 		do_relocs(p, laddr(p, dyn[DT_JMPREL]), dyn[DT_PLTRELSZ],
 			2+(dyn[DT_PLTREL]==DT_RELA));
 		do_relocs(p, laddr(p, dyn[DT_REL]), dyn[DT_RELSZ], 2);
 		do_relocs(p, laddr(p, dyn[DT_RELA]), dyn[DT_RELASZ], 3);
-
+#if 0
 		if (head != &ldso && p->relro_start != p->relro_end &&
 		    mprotect(laddr(p, p->relro_start), p->relro_end-p->relro_start, PROT_READ)
 		    && errno != ENOSYS) {
@@ -1340,7 +1471,7 @@ static void reloc_all(struct dso *p)
 				p->name);
 			if (runtime) longjmp(*rtld_fail, 1);
 		}
-
+#endif
 		p->relocated = 1;
 	}
 }
@@ -1380,6 +1511,8 @@ void __libc_exit_fini()
 	struct dso *p;
 	size_t dyn[DYN_CNT];
 	int self = __pthread_self()->tid;
+
+	pr_debug("__libc_exit_fini\n");
 
 	/* Take both locks before setting shutting_down, so that
 	 * either lock is sufficient to read its value. The lock
@@ -1547,6 +1680,8 @@ static void install_new_tls(void)
 	size_t i, j;
 	size_t old_cnt = self->dtv[0];
 
+	pr_debug("install_new_tls\n");
+
 	__block_app_sigs(&set);
 	__tl_lock();
 	/* Copy existing dtv contents from all existing threads. */
@@ -1598,12 +1733,23 @@ static void install_new_tls(void)
  * linker itself, but some of the relocations performed may need to be
  * replaced later due to copy relocations in the main program. */
 
+#ifndef __CHERI_PURE_CAPABILITY__
 hidden void __dls2(unsigned char *base, size_t *sp)
 {
 	size_t *auxv;
 	for (auxv=sp+1+*sp+1; *auxv; auxv++);
 	auxv++;
+#else
+hidden void __dls2(unsigned char *base, __start_params_t *sp)
+{
+	size_t *auxv = sp->auxv;
+#endif
+	pr_debug("STAGE 2\n");
+	pr_debug("ldso.base: %#lx\n", base);
+	pr_debug_cap("ldso.base: ", base);
+
 	if (DL_FDPIC) {
+#ifndef __CHERI_PURE_CAPABILITY__
 		void *p1 = (void *)sp[-2];
 		void *p2 = (void *)sp[-1];
 		if (!p1) {
@@ -1615,6 +1761,7 @@ hidden void __dls2(unsigned char *base, size_t *sp)
 		app_loadmap = p2 ? p1 : 0;
 		ldso.loadmap = p2 ? p2 : p1;
 		ldso.base = laddr(&ldso, 0);
+#endif
 	} else {
 		ldso.base = base;
 	}
@@ -1649,12 +1796,17 @@ hidden void __dls2(unsigned char *base, size_t *sp)
 
 	ldso.relocated = 0;
 
+
 	/* Call dynamic linker stage-2b, __dls2b, looking it up
 	 * symbolically as a barrier against moving the address
 	 * load across the above relocation processing. */
 	struct symdef dls2b_def = find_sym(&ldso, "__dls2b", 0);
+#ifndef __CHERI_PURE_CAPABILITY__
 	if (DL_FDPIC) ((stage3_func)&ldso.funcdescs[dls2b_def.sym-ldso.syms])(sp, auxv);
 	else ((stage3_func)laddr(&ldso, dls2b_def.sym->st_value))(sp, auxv);
+#else
+	((stage3_func)fpaddr(&ldso, dls2b_def.sym->st_value))(sp);
+#endif
 }
 
 /* Stage 2b sets up a valid thread pointer, which requires relocations
@@ -1663,8 +1815,16 @@ hidden void __dls2(unsigned char *base, size_t *sp)
  * so that loads of the thread pointer and &errno can be pure/const and
  * thereby hoistable. */
 
+#ifndef __CHERI_PURE_CAPABILITY__
 void __dls2b(size_t *sp, size_t *auxv)
 {
+#else
+void __dls2b(__start_params_t *sp)
+{
+	size_t *auxv = sp->auxv;
+#endif
+	pr_debug("STAGE 2b\n");
+
 	/* Setup early thread pointer in builtin_tls for ldso/libc itself to
 	 * use during dynamic linking. If possible it will also serve as the
 	 * thread pointer at runtime. */
@@ -1677,8 +1837,22 @@ void __dls2b(size_t *sp, size_t *auxv)
 	}
 
 	struct symdef dls3_def = find_sym(&ldso, "__dls3", 0);
+#ifndef __CHERI_PURE_CAPABILITY__
 	if (DL_FDPIC) ((stage3_func)&ldso.funcdescs[dls3_def.sym-ldso.syms])(sp, auxv);
 	else ((stage3_func)laddr(&ldso, dls3_def.sym->st_value))(sp, auxv);
+#else
+	((stage3_func)fpaddr(&ldso, dls3_def.sym->st_value))(sp);
+#endif
+}
+
+void pr_msg(const char *restrict fmt, ...)
+{
+	char buf[128];
+	va_list ap;
+	va_start(ap, fmt);
+	vsprintf(buf, fmt, ap);
+	va_end(ap);
+	__write(1, buf, strlen(buf));
 }
 
 /* Stage 3 of the dynamic linker is called with the dynamic linker/libc
@@ -1686,18 +1860,31 @@ void __dls2b(size_t *sp, size_t *auxv)
  * process dependencies and relocations for the main application and
  * transfer control to its entry point. */
 
+#ifndef __CHERI_PURE_CAPABILITY__
 void __dls3(size_t *sp, size_t *auxv)
+#else
+void __dls3(__start_params_t *sp)
+#endif
 {
 	static struct dso app, vdso;
 	size_t aux[AUX_CNT];
 	size_t i;
 	char *env_preload=0;
 	char *replace_argv0=0;
-	size_t vdso_base;
+	size_t vdso_base_addr;
+#ifndef __CHERI_PURE_CAPABILITY__
 	int argc = *sp;
 	char **argv = (void *)(sp+1);
-	char **argv_orig = argv;
 	char **envp = argv+argc+1;
+#else
+	int argc = sp->argc;
+	char **argv = sp->argv;
+	char **envp = sp->envp;
+	size_t *auxv = sp->auxv;
+#endif
+	char **argv_orig = argv;
+
+	pr_debug("STAGE 3a\n");
 
 	/* Find aux vector just past environ[] and use it to initialize
 	 * global data that may be needed before we can make syscalls. */
@@ -1706,6 +1893,10 @@ void __dls3(size_t *sp, size_t *auxv)
 	search_vec(auxv, &__sysinfo, AT_SYSINFO);
 	__pthread_self()->sysinfo = __sysinfo;
 	libc.page_size = aux[AT_PAGESZ];
+
+	pr_debug("__dls3: AT_PAGESZ=%d, page_size=%d, addr=%#lx\n",
+		 AT_PAGESZ, libc.page_size, (long)&libc);
+
 	libc.secure = ((aux[0]&0x7800)!=0x7800 || aux[AT_UID]!=aux[AT_EUID]
 		|| aux[AT_GID]!=aux[AT_EGID] || aux[AT_SECURE]);
 
@@ -1722,12 +1913,19 @@ void __dls3(size_t *sp, size_t *auxv)
 		size_t interp_off = 0;
 		size_t tls_image = 0;
 		/* Find load address of the main program, via AT_PHDR vs PT_PHDR. */
-		Phdr *phdr = app.phdr = (void *)aux[AT_PHDR];
+		Phdr *phdr = app.phdr = cast_to_ptr(void, aux[AT_PHDR], -1);
 		app.phnum = aux[AT_PHNUM];
 		app.phentsize = aux[AT_PHENT];
 		for (i=aux[AT_PHNUM]; i; i--, phdr=(void *)((char *)phdr + aux[AT_PHENT])) {
-			if (phdr->p_type == PT_PHDR)
+			if (phdr->p_type == PT_PHDR) {
+#ifndef __CHERI_PURE_CAPABILITY__
 				app.base = (void *)(aux[AT_PHDR] - phdr->p_vaddr);
+#else
+				// FIXME: siplify using app.phdr
+				// app.base must be valid NULL pointer!!!!
+				app.base = cheri_setaddress(sp->base_cap, aux[AT_PHDR] - phdr->p_vaddr);
+#endif
+			}
 			else if (phdr->p_type == PT_INTERP)
 				interp_off = (size_t)phdr->p_vaddr;
 			else if (phdr->p_type == PT_TLS) {
@@ -1740,9 +1938,10 @@ void __dls3(size_t *sp, size_t *auxv)
 		if (DL_FDPIC) app.loadmap = app_loadmap;
 		if (app.tls.size) app.tls.image = laddr(&app, tls_image);
 		if (interp_off) ldso.name = laddr(&app, interp_off);
+		char *execfn = cast_to_ptr(char, aux[AT_EXECFN], -1);
 		if ((aux[0] & (1UL<<AT_EXECFN))
-		    && strncmp((char *)aux[AT_EXECFN], "/proc/", 6))
-			app.name = (char *)aux[AT_EXECFN];
+		    && strncmp(execfn, "/proc/", 6))
+			app.name = execfn;
 		else
 			app.name = argv[0];
 		kernel_mapped_dso(&app);
@@ -1780,8 +1979,9 @@ void __dls3(size_t *sp, size_t *auxv)
 			dprintf(2, "musl libc (" LDSO_ARCH ")\n"
 				"Version %s\n"
 				"Dynamic Program Loader\n"
+				"Load address: %#lx\n"
 				"Usage: %s [options] [--] pathname%s\n",
-				__libc_version, ldname,
+				__libc_version, ldso.base, ldname,
 				ldd_mode ? "" : " [args]");
 			_exit(1);
 		}
@@ -1854,7 +2054,8 @@ void __dls3(size_t *sp, size_t *auxv)
 
 	/* Attach to vdso, if provided by the kernel, last so that it does
 	 * not become part of the global namespace.  */
-	if (search_vec(auxv, &vdso_base, AT_SYSINFO_EHDR) && vdso_base) {
+	if (search_vec(auxv, &vdso_base_addr, AT_SYSINFO_EHDR) && vdso_base_addr) {
+		char *vdso_base = cast_to_ptr(char, vdso_base_addr, -1);
 		Ehdr *ehdr = (void *)vdso_base;
 		Phdr *phdr = vdso.phdr = (void *)(vdso_base + ehdr->e_phoff);
 		vdso.phnum = ehdr->e_phnum;
@@ -1879,10 +2080,12 @@ void __dls3(size_t *sp, size_t *auxv)
 		if (!DT_DEBUG_INDIRECT && app.dynv[i]==DT_DEBUG)
 			app.dynv[i+1] = (size_t)&debug;
 		if (DT_DEBUG_INDIRECT && app.dynv[i]==DT_DEBUG_INDIRECT) {
-			size_t *ptr = (size_t *) app.dynv[i+1];
+			size_t *ptr = (size_t *) cast_to_ptr(size_t, app.dynv[i+1], -1);
 			*ptr = (size_t)&debug;
 		}
 	}
+
+	pr_debug("STAGE 3b\n");
 
 	/* This must be done before final relocations, since it calls
 	 * malloc, which may be provided by the application. Calling any
@@ -1911,6 +2114,8 @@ void __dls3(size_t *sp, size_t *auxv)
 	reloc_all(app.next);
 	reloc_all(&app);
 
+	pr_debug("STAGE 3c\n");
+
 	/* Actual copying to new TLS needs to happen after relocations,
 	 * since the TLS images might have contained relocated addresses. */
 	if (initial_tls != builtin_tls) {
@@ -1928,6 +2133,8 @@ void __dls3(size_t *sp, size_t *auxv)
 		libc.tls_size = tmp_tls_size;
 	}
 
+	pr_debug("STAGE 3d\n");
+
 	if (ldso_fail) _exit(127);
 	if (ldd_mode) _exit(0);
 
@@ -1936,6 +2143,8 @@ void __dls3(size_t *sp, size_t *auxv)
 	 * possibility of incomplete replacement. */
 	if (find_sym(head, "malloc", 1).dso != &ldso)
 		__malloc_replaced = 1;
+
+	pr_debug("STAGE 3e\n");
 
 	/* Switch to runtime mode: any further failures in the dynamic
 	 * linker are a reportable failure rather than a fatal startup
@@ -1953,8 +2162,13 @@ void __dls3(size_t *sp, size_t *auxv)
 
 	errno = 0;
 
-	CRTJMP((void *)aux[AT_ENTRY], argv-1);
-	for(;;);
+#ifndef __CHERI_PURE_CAPABILITY__
+	CRTJMP((void *)aux[AT_ENTRY], sp);
+#else
+	pr_debug("STAGE 3f, auxv=%#lx, sp->auxv=%#lx\n", (long)auxv, (long)sp->auxv);
+	pr_debug("ENTRY: %#lx, SP: %#lx\n", aux[AT_ENTRY], sp->sp);
+	CRTJMP(aux[AT_ENTRY], sp->sp);
+#endif
 }
 
 static void prepare_lazy(struct dso *p)
@@ -2176,6 +2390,8 @@ int dladdr(const void *addr_arg, Dl_info *info)
 	char *strings;
 	size_t best = 0;
 	size_t besterr = -1;
+
+	pr_debug("dladdr\n");
 
 	pthread_rwlock_rdlock(&lock);
 	p = addr2dso(addr);

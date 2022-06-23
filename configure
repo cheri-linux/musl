@@ -340,7 +340,7 @@ tryflag CFLAGS_C99FSE -ffreestanding \
 || tryflag CFLAGS_C99FSE -fno-builtin
 tryflag CFLAGS_C99FSE -fexcess-precision=standard \
 || { test "$ARCH" = i386 && tryflag CFLAGS_C99FSE -ffloat-store ; }
-tryflag CFLAGS_C99FSE -frounding-math
+#tryflag CFLAGS_C99FSE -frounding-math
 
 #
 # We may use the may_alias attribute if __GNUC__ is defined, so
@@ -640,6 +640,8 @@ trycppif "_MIPS_SIM != _ABI64" "$t" && ARCH=mipsn32
 trycppif "__mips_isa_rev >= 6" "$t" && SUBARCH=${SUBARCH}r6
 trycppif "_MIPSEL || __MIPSEL || __MIPSEL__" "$t" && SUBARCH=${SUBARCH}el
 trycppif __mips_soft_float "$t" && SUBARCH=${SUBARCH}-sf
+trycppif __CHERI_PURE_CAPABILITY__ "$t" && SUBARCH=${SUBARCH}cheri
+trycppif __clang__ "$t" && SUBARCH=${SUBARCH}-clang
 fi
 
 if test "$ARCH" = "powerpc" ; then
@@ -669,6 +671,8 @@ fi
 if test "$ARCH" = "riscv64" ; then
 trycppif __riscv_float_abi_soft "$t" && SUBARCH=${SUBARCH}-sf
 trycppif __riscv_float_abi_single "$t" && SUBARCH=${SUBARCH}-sp
+trycppif __CHERI_PURE_CAPABILITY__ "$t" && SUBARCH=${SUBARCH}cheri
+trycppif __clang__ "$t" && SUBARCH=${SUBARCH}-clang
 fi
 
 if test "$ARCH" = "sh" ; then

@@ -20,7 +20,7 @@ struct bin {
 	struct chunk *tail;
 };
 
-#define SIZE_ALIGN (4*sizeof(size_t))
+#define SIZE_ALIGN (4*sizeof(uintptr_t))
 #define SIZE_MASK (-SIZE_ALIGN)
 #define OVERHEAD (2*sizeof(size_t))
 #define MMAP_THRESHOLD (0x1c00*SIZE_ALIGN)

@@ -4,7 +4,10 @@
 extern "C" {
 #endif
 
+#define __NEED_uintptr_t
+
 #include <bits/alltypes.h>
+
 #include <bits/ioctl.h>
 
 #define N_TTY           0
@@ -117,7 +120,28 @@ struct winsize {
 #define SIOCDEVPRIVATE     0x89F0
 #define SIOCPROTOPRIVATE   0x89E0
 
+#ifndef __CHERI_PURE_CAPABILITY__
 int ioctl (int, int, ...);
+#else
+
+#define __IOCTL_NARGS_X(a,b,c,d,...) d
+#define __IOCTL_NARGS(...) __IOCTL_NARGS_X(__VA_ARGS__,1,0,)
+#define __IOCTL_CONCAT_X(a,b) a##b
+#define __IOCTL_CONCAT(a,b) __IOCTL_CONCAT_X(a,b)
+#define __IOCTL_DISP(b,...) __IOCTL_CONCAT(b,__IOCTL_NARGS(__VA_ARGS__))(__VA_ARGS__)
+
+int __ioctl_cheri(int, int, ...);
+
+#ifndef __ioc
+#define __ioc(X) ((uintptr_t)(X))
+#endif
+
+#define __ioctl_cheri0(a,b) (__ioctl_cheri)(a,b,__ioc(0))
+#define __ioctl_cheri1(a,b,c) (__ioctl_cheri)(a,b,__ioc(c))
+
+#define ioctl(...) __IOCTL_DISP(__ioctl_cheri,__VA_ARGS__)
+
+#endif
 
 #ifdef __cplusplus
 }

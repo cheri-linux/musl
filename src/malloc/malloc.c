@@ -10,6 +10,10 @@
 #include "pthread_impl.h"
 #include "malloc_impl.h"
 
+#ifdef __CHERI_PURE_CAPABILITY__
+#define _BOUNDS
+#endif
+
 #if defined(__GNUC__) && defined(__PIC__)
 #define inline inline __attribute__((always_inline))
 #endif
@@ -21,6 +25,38 @@ static struct {
 } mal;
 
 int __malloc_replaced;
+
+#ifdef _BOUNDS
+static void *bound_ptr(void *p, size_t nbytes)
+{
+	//pr_debug_cap("M: ", p);
+	p = cheri_andperm(cheri_csetbounds(p, nbytes),
+			CHERI_PERMS_USERSPACE_DATA & ~CHERI_PERM_CHERIABI_VMMAP);
+	//pr_debug_cap("MB: ", p);
+	return p;
+}
+
+static void *unbound_ptr(void *p)
+{
+	//pr_debug_cap("C: ", p);
+	p = cheri_setaddress(cheri_getdefault(), (long)p);
+	//pr_debug_cap("CB: ", p);
+	return p;
+}
+
+#else
+
+static inline void *bound_ptr(void *p, size_t nbytes)
+{
+	return p;
+}
+
+static inline void *unbound_ptr(void *p)
+{
+	return p;
+}
+
+#endif
 
 /* Synchronization tools */
 
@@ -132,6 +168,8 @@ static struct chunk *expand_heap(size_t n)
 	static void *end;
 	void *p;
 	struct chunk *w;
+
+	//pr_debug("expand_heap: %d\n", n);
 
 	/* The argument n already accounts for the caller's chunk
 	 * overhead needs, but if the heap can't be extended in-place,
@@ -288,6 +326,10 @@ void *malloc(size_t n)
 {
 	struct chunk *c;
 	int i, j;
+	void *p;
+	size_t bound = n;
+
+	//pr_debug("MALLOC: %d\n", n);
 
 	if (adjust_size(&n) < 0) return 0;
 
@@ -299,6 +341,7 @@ void *malloc(size_t n)
 		c = (void *)(base + SIZE_ALIGN - OVERHEAD);
 		c->csize = len - (SIZE_ALIGN - OVERHEAD);
 		c->psize = SIZE_ALIGN - OVERHEAD;
+		memset(CHUNK_TO_MEM(c), 0, n - OVERHEAD);
 		return CHUNK_TO_MEM(c);
 	}
 
@@ -320,6 +363,8 @@ void *malloc(size_t n)
 		lock_bin(j);
 		c = mal.bins[j].head;
 		if (c != BIN_TO_CHUNK(j)) {
+			//pr_debug("chunk: %d\n", j);
+			//pr_debug_cap("c: ", BIN_TO_CHUNK(j));
 			if (!pretrim(c, n, i, j)) unbin(c, j);
 			unlock_bin(j);
 			break;
@@ -330,7 +375,11 @@ void *malloc(size_t n)
 	/* Now patch up in case we over-allocated */
 	trim(c, n);
 
-	return CHUNK_TO_MEM(c);
+	//pr_debug_cap("C: ", c);
+	p = CHUNK_TO_MEM(c);
+	//pr_debug_cap("M: ", p);
+	memset(p, 0, n - OVERHEAD);
+	return bound_ptr(p, bound);
 }
 
 static size_t mal0_clear(char *p, size_t pagesz, size_t n)
@@ -361,10 +410,11 @@ void *calloc(size_t m, size_t n)
 	void *p = malloc(n);
 	if (!p) return p;
 	if (!__malloc_replaced) {
-		if (IS_MMAPPED(MEM_TO_CHUNK(p)))
+		void *mp = unbound_ptr(p);
+		if (IS_MMAPPED(MEM_TO_CHUNK(mp)))
 			return p;
 		if (n >= PAGE_SIZE)
-			n = mal0_clear(p, PAGE_SIZE, n);
+			n = mal0_clear(mp, PAGE_SIZE, n);
 	}
 	return memset(p, 0, n);
 }
@@ -374,12 +424,19 @@ void *realloc(void *p, size_t n)
 	struct chunk *self, *next;
 	size_t n0, n1;
 	void *new;
+	size_t bound = n;
+
+	//pr_debug("REALLOC: %ld\n", n);
 
 	if (!p) return malloc(n);
 
 	if (adjust_size(&n) < 0) return 0;
 
+	p = unbound_ptr(p);
+
+	//pr_debug_cap("p: ", p);
 	self = MEM_TO_CHUNK(p);
+	//pr_debug_cap("self: ", self);
 	n1 = n0 = CHUNK_SIZE(self);
 
 	if (IS_MMAPPED(self)) {
@@ -394,13 +451,13 @@ void *realloc(void *p, size_t n)
 			goto copy_free_ret;
 		}
 		newlen = (newlen + PAGE_SIZE-1) & -PAGE_SIZE;
-		if (oldlen == newlen) return p;
+		if (oldlen == newlen) return bound_ptr(p, bound);
 		base = __mremap(base, oldlen, newlen, MREMAP_MAYMOVE);
 		if (base == (void *)-1)
 			goto copy_realloc;
 		self = (void *)(base + extra);
 		self->csize = newlen - extra;
-		return CHUNK_TO_MEM(self);
+		return bound_ptr(CHUNK_TO_MEM(self), bound);
 	}
 
 	next = NEXT_CHUNK(self);
@@ -427,7 +484,7 @@ void *realloc(void *p, size_t n)
 	if (n <= n1) {
 		//memmove(CHUNK_TO_MEM(self), p, n0-OVERHEAD);
 		trim(self, n);
-		return CHUNK_TO_MEM(self);
+		return bound_ptr(CHUNK_TO_MEM(self), bound);
 	}
 
 copy_realloc:
@@ -523,7 +580,7 @@ void free(void *p)
 {
 	if (!p) return;
 
-	struct chunk *self = MEM_TO_CHUNK(p);
+	struct chunk *self = MEM_TO_CHUNK(unbound_ptr(p));
 
 	if (IS_MMAPPED(self))
 		unmap_chunk(self);

@@ -7,6 +7,8 @@
 #include <stddef.h>
 #include <stdarg.h>
 
+#include "libc.h"
+
 #if UINTPTR_MAX == 0xffffffff
 typedef Elf32_Ehdr Ehdr;
 typedef Elf32_Phdr Phdr;
@@ -95,7 +97,11 @@ struct fdpic_dummy_loadmap {
 #define AUX_CNT 32
 #define DYN_CNT 32
 
+#ifndef __CHERI_PURE_CAPABILITY__
 typedef void (*stage2_func)(unsigned char *, size_t *);
+#else
+typedef void (*stage2_func)(unsigned char *, __start_params_t *);
+#endif
 
 hidden void *__dlsym(void *restrict, const char *restrict, void *restrict);
 

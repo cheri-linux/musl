@@ -18,5 +18,18 @@
 #define REL_DTPOFF      R_RISCV_TLS_DTPREL64
 #define REL_TPOFF       R_RISCV_TLS_TPREL64
 
+#ifdef __CHERI_PURE_CAPABILITY__
+
+#define CRTJMP(pc,sp) __asm__ __volatile__( \
+	"csetaddr csp, csp, %1\n\t" \
+	"cspecialr ct0, pcc\n\t" \
+	"csetaddr ct0, ct0, %0\n\t" \
+	"cjr ct0\n\t" \
+	: : "r"(pc), "r"(sp) : "memory")
+
+#else
+
 #define CRTJMP(pc,sp) __asm__ __volatile__( \
 	"mv sp, %1 ; jr %0" : : "r"(pc), "r"(sp) : "memory" )
+
+#endif

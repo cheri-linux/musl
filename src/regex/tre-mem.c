@@ -38,6 +38,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 #include "tre.h"
 
@@ -143,7 +144,7 @@ tre_mem_alloc_impl(tre_mem_t mem, int provided, void *provided_block,
     }
 
   /* Make sure the next pointer will be aligned. */
-  size += ALIGN(mem->ptr + size, long);
+  size += ALIGN(mem->ptr + size, intptr_t);
 
   /* Allocate from current block. */
   ptr = mem->ptr;

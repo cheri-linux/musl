@@ -10,6 +10,7 @@ extern "C" {
 #define __NEED_size_t
 #define __NEED_ssize_t
 #define __NEED_struct_iovec
+#define __NEED_struct_kernel_iovec
 
 #if defined(_GNU_SOURCE) || defined(_BSD_SOURCE)
 #define __NEED_off_t

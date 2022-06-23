@@ -46,7 +46,7 @@ void *__vdsosym(const char *vername, const char *name)
 	for (i=0; libc.auxv[i] != AT_SYSINFO_EHDR; i+=2)
 		if (!libc.auxv[i]) return 0;
 	if (!libc.auxv[i+1]) return 0;
-	Ehdr *eh = (void *)libc.auxv[i+1];
+	Ehdr *eh = cast_to_ptr(Ehdr, libc.auxv[i+1], -1);
 	Phdr *ph = (void *)((char *)eh + eh->e_phoff);
 	size_t *dynv=0, base=-1;
 	for (i=0; i<eh->e_phnum; i++, ph=(void *)((char *)ph+eh->e_phentsize)) {
@@ -64,7 +64,7 @@ void *__vdsosym(const char *vername, const char *name)
 	Verdef *verdef = 0;
 	
 	for (i=0; dynv[i]; i+=2) {
-		void *p = (void *)(base + dynv[i+1]);
+		void *p = cast_to_ptr(void, base + dynv[i+1], -1);
 		switch(dynv[i]) {
 		case DT_STRTAB: strings = p; break;
 		case DT_SYMTAB: syms = p; break;

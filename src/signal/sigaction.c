@@ -58,9 +58,9 @@ int __libc_sigaction(int sig, const struct sigaction *restrict sa, struct sigact
 			__block_all_sigs(&set);
 			LOCK(__abort_lock);
 		}
-		ksa.handler = sa->sa_handler;
+		ksa.handler = (__kptr_t)sa->sa_handler;
 		ksa.flags = sa->sa_flags | SA_RESTORER;
-		ksa.restorer = (sa->sa_flags & SA_SIGINFO) ? __restore_rt : __restore;
+		ksa.restorer = (__kptr_t)((sa->sa_flags & SA_SIGINFO) ? __restore_rt : __restore);
 		memcpy(&ksa.mask, &sa->sa_mask, _NSIG/8);
 	}
 	int r = __syscall(SYS_rt_sigaction, sig, sa?&ksa:0, old?&ksa_old:0, _NSIG/8);
@@ -69,7 +69,13 @@ int __libc_sigaction(int sig, const struct sigaction *restrict sa, struct sigact
 		__restore_sigs(&set);
 	}
 	if (old && !r) {
+#if defined( __CHERI_PURE_CAPABILITY__) && !defined(SYSCALL_PURECAP)
+		void* handler = __builtin_cheri_program_counter_get();
+		handler = __builtin_cheri_address_set(handler, ksa_old.handler);
+		old->sa_handler = handler;
+#else
 		old->sa_handler = ksa_old.handler;
+#endif
 		old->sa_flags = ksa_old.flags;
 		memcpy(&old->sa_mask, &ksa_old.mask, _NSIG/8);
 	}

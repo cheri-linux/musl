@@ -112,12 +112,18 @@ static void convert_ioctl_struct(const struct ioctl_compat_map *map, char *old, 
 	else memcpy(new+new_offset, old+old_offset, old_size-old_offset);
 }
 
+#undef ioctl
+
+#ifndef __CHERI_PURE_CAPABILITY__
 int ioctl(int fd, int req, ...)
+#else
+int __ioctl_cheri(int fd, int req, ...)
+#endif
 {
-	void *arg;
+	uintptr_t arg;
 	va_list ap;
 	va_start(ap, req);
-	arg = va_arg(ap, void *);
+	arg = va_arg(ap, uintptr_t);
 	va_end(ap);
 	int r = __syscall(SYS_ioctl, fd, req, arg);
 	if (SIOCGSTAMP != SIOCGSTAMP_OLD && req && r==-ENOTTY) {

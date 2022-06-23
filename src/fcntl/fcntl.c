@@ -4,19 +4,25 @@
 #include <errno.h>
 #include "syscall.h"
 
+#undef fcntl
+
+#ifndef __CHERI_PURE_CAPABILITY__
 int fcntl(int fd, int cmd, ...)
+#else
+int __fcntl_cheri(int fd, int cmd, ...)
+#endif
 {
-	unsigned long arg;
+	uintptr_t arg;
 	va_list ap;
 	va_start(ap, cmd);
-	arg = va_arg(ap, unsigned long);
+	arg = va_arg(ap, uintptr_t);
 	va_end(ap);
 	if (cmd == F_SETFL) arg |= O_LARGEFILE;
-	if (cmd == F_SETLKW) return syscall_cp(SYS_fcntl, fd, cmd, (void *)arg);
+	if (cmd == F_SETLKW) return syscall_cp(SYS_fcntl, fd, cmd, arg);
 	if (cmd == F_GETOWN) {
 		struct f_owner_ex ex;
 		int ret = __syscall(SYS_fcntl, fd, F_GETOWN_EX, &ex);
-		if (ret == -EINVAL) return __syscall(SYS_fcntl, fd, cmd, (void *)arg);
+		if (ret == -EINVAL) return __syscall(SYS_fcntl, fd, cmd, arg);
 		if (ret) return __syscall_ret(ret);
 		return ex.type == F_OWNER_PGRP ? -ex.pid : ex.pid;
 	}
@@ -36,13 +42,5 @@ int fcntl(int fd, int cmd, ...)
 		if (ret >= 0) __syscall(SYS_fcntl, ret, F_SETFD, FD_CLOEXEC);
 		return __syscall_ret(ret);
 	}
-	switch (cmd) {
-	case F_SETLK:
-	case F_GETLK:
-	case F_GETOWN_EX:
-	case F_SETOWN_EX:
-		return syscall(SYS_fcntl, fd, cmd, (void *)arg);
-	default:
-		return syscall(SYS_fcntl, fd, cmd, arg);
-	}
+	return syscall(SYS_fcntl, fd, cmd, arg);
 }

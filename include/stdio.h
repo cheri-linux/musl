@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 #include <features.h>
+#include <string.h>
 
 #define __NEED_FILE
 #define __NEED___isoc_va_list
@@ -217,6 +218,28 @@ FILE *fopencookie(void *, const char *, cookie_io_functions_t);
 
 #ifdef __cplusplus
 }
+#endif
+
+ssize_t __write(int fd, const void *buf, size_t count);
+
+#define pr_info(fmt, args...) ({ \
+		char __buf[512]; \
+		int num = sprintf(__buf, fmt, ##args); \
+		__write(2, __buf, num + 1); \
+	})
+
+#ifdef _DEBUG
+#define pr_debug(fmt, args...)	pr_info(fmt, ##args)
+#define pr_debug_cap(msg, cap)	cheri_print_cap(msg, cap)
+#else
+#define pr_debug(fmt, args...)
+#define pr_debug_cap(msg, cap)
+#endif
+
+#ifdef __CHERI_PURE_CAPABILITY__
+void cheri_print_cap(const char *msg, const void * __capability cap);
+#else
+void cheri_print_cap(const char *msg, const void *cap);
 #endif
 
 #endif

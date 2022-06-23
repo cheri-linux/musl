@@ -28,6 +28,7 @@ extern "C" {
 #define __NEED_off_t
 #define __NEED_pid_t
 #define __NEED_intptr_t
+#define __NEED_uintptr_t
 #define __NEED_useconds_t
 
 #include <bits/alltypes.h>
@@ -172,7 +173,37 @@ void setusershell(void);
 void endusershell(void);
 char *getusershell(void);
 int acct(const char *);
+
+#ifndef __CHERI_PURE_CAPABILITY__
 long syscall(long, ...);
+#else
+
+#define __sccap(X) ((uintptr_t) (X))
+
+long __syscall_cheri(long, uintptr_t, uintptr_t, uintptr_t,
+		     uintptr_t, uintptr_t, uintptr_t);
+
+#define __SYSCALL_NARGS_X(a,b,c,d,e,f,g,h,n,...) n
+#define __SYSCALL_NARGS(...) __SYSCALL_NARGS_X(__VA_ARGS__,7,6,5,4,3,2,1,0,)
+#define __SYSCALL_CONCAT_X(a,b) a##b
+#define __SYSCALL_CONCAT(a,b) __SYSCALL_CONCAT_X(a,b)
+#define __SYSCALL_DISP(b,...) __SYSCALL_CONCAT(b,__SYSCALL_NARGS(__VA_ARGS__))(__VA_ARGS__)
+
+#define __syscall_cheri0(n) (__syscall_cheri)(n,0,0,0,0,0,0)
+#define __syscall_cheri1(n,a) (__syscall_cheri)(n,__sccap(a),0,0,0,0,0)
+#define __syscall_cheri2(n,a,b) (__syscall_cheri)(n,__sccap(a),__sccap(b),0,0,0,0)
+#define __syscall_cheri3(n,a,b,c) (__syscall_cheri)(n,__sccap(a),__sccap(b),__sccap(c),0,0,0)
+#define __syscall_cheri4(n,a,b,c,d) (__syscall_cheri)(n,__sccap(a),__sccap(b),__sccap(c),__sccap(d),0,0)
+#define __syscall_cheri5(n,a,b,c,d,e) (__syscall_cheri)(n,__sccap(a),__sccap(b),__sccap(c),__sccap(d),__sccap(e),0)
+#define __syscall_cheri6(n,a,b,c,d,e,f) (__syscall_cheri)(n,__sccap(a),__sccap(b),__sccap(c),__sccap(d),__sccap(e),__sccap(f))
+
+#ifdef syscall
+#error "syscall.h must be included after unitstd.h"
+#endif
+
+#define syscall(...) __SYSCALL_DISP(__syscall_cheri,__VA_ARGS__)
+
+#endif
 int execvpe(const char *, char *const [], char *const []);
 int issetugid(void);
 int getentropy(void *, size_t);

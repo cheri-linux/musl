@@ -1,7 +1,11 @@
 static inline struct pthread *__pthread_self()
 {
 	char *tp;
+#ifndef __CHERI_PURE_CAPABILITY__
 	__asm__ __volatile__("mv %0, tp" : "=r"(tp));
+#else
+	__asm__ __volatile__("cmove %0, ctp" : "=C"(tp));
+#endif
 	return (void *)(tp - sizeof(struct pthread));
 }
 

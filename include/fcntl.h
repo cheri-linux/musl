@@ -10,6 +10,7 @@ extern "C" {
 #define __NEED_off_t
 #define __NEED_pid_t
 #define __NEED_mode_t
+#define __NEED_uintptr_t
 
 #ifdef _GNU_SOURCE
 #define __NEED_size_t
@@ -30,7 +31,29 @@ struct flock {
 };
 
 int creat(const char *, mode_t);
+
+#ifndef __CHERI_PURE_CAPABILITY__
 int fcntl(int, int, ...);
+#else
+
+#define __FCNTL_NARGS_X(a,b,c,d,...) d
+#define __FCNTL_NARGS(...) __FCNTL_NARGS_X(__VA_ARGS__,1,0,)
+#define __FCNTL_CONCAT_X(a,b) a##b
+#define __FCNTL_CONCAT(a,b) __FCNTL_CONCAT_X(a,b)
+#define __FCNTL_DISP(b,...) __FCNTL_CONCAT(b,__FCNTL_NARGS(__VA_ARGS__))(__VA_ARGS__)
+
+int __fcntl_cheri(int, int, ...);
+
+#ifndef __fcc
+#define __fcc(X) ((uintptr_t)(X))
+#endif
+
+#define __fcntl_cheri0(a,b) (__fcntl_cheri)(a,b,__fcc(0))
+#define __fcntl_cheri1(a,b,c) (__fcntl_cheri)(a,b,__fcc(c))
+
+#define fcntl(...) __FCNTL_DISP(__fcntl_cheri,__VA_ARGS__)
+
+#endif
 int open(const char *, int, ...);
 int openat(int, const char *, int, ...);
 int posix_fadvise(int, off_t, off_t, int);

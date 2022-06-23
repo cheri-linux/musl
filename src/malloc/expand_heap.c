@@ -38,9 +38,11 @@ static int traverses_stack_p(uintptr_t old, uintptr_t new)
 
 void *__expand_heap(size_t *pn)
 {
-	static uintptr_t brk;
+	static unsigned long brk;
 	static unsigned mmap_step;
 	size_t n = *pn;
+
+	//pr_debug("__expand_heap(): %d, brk: %#lx\n", n, brk);
 
 	if (n > SIZE_MAX/2 - PAGE_SIZE) {
 		errno = ENOMEM;
@@ -51,13 +53,15 @@ void *__expand_heap(size_t *pn)
 	if (!brk) {
 		brk = __syscall(SYS_brk, 0);
 		brk += -brk & PAGE_SIZE-1;
+		//pr_debug("set brk: %#lx\n", brk);
 	}
 
 	if (n < SIZE_MAX-brk && !traverses_stack_p(brk, brk+n)
 	    && __syscall(SYS_brk, brk+n)==brk+n) {
 		*pn = n;
 		brk += n;
-		return (void *)(brk-n);
+		//pr_debug("update brk: %#lx\n", brk);
+		return cast_to_ptr(void, brk-n, n);
 	}
 
 	size_t min = (size_t)PAGE_SIZE << mmap_step/2;

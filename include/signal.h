@@ -122,6 +122,7 @@ typedef struct {
 			} __second;
 		} __si_common;
 		struct {
+			// FIXME void... and related functions
 			void *si_addr;
 			short si_addr_lsb;
 			union {

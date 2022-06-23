@@ -3,7 +3,10 @@
 
 #include <features.h>
 #include <sys/syscall.h>
-#include "syscall_arch.h"
+
+#define __NEED___kptr_t
+#define __NEED_uintptr_t
+#include <bits/alltypes.h>
 
 #ifndef SYSCALL_RLIM_INFINITY
 #define SYSCALL_RLIM_INFINITY (~0ULL)
@@ -18,12 +21,19 @@
 #endif
 
 #ifndef __scc
+#ifndef SYSCALL_PURECAP
 #define __scc(X) ((long) (X))
 typedef long syscall_arg_t;
+#else
+#define __scc(X) ((uintptr_t) (X))
+typedef uintptr_t syscall_arg_t;
+#endif
 #endif
 
+#include "syscall_arch.h"
+
 hidden long __syscall_ret(unsigned long),
-	__syscall_cp(syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t,
+	__syscall_cp(long, syscall_arg_t, syscall_arg_t, syscall_arg_t,
 	             syscall_arg_t, syscall_arg_t, syscall_arg_t);
 
 #define __syscall1(n,a) __syscall1(n,__scc(a))
@@ -41,6 +51,7 @@ hidden long __syscall_ret(unsigned long),
 #define __SYSCALL_DISP(b,...) __SYSCALL_CONCAT(b,__SYSCALL_NARGS(__VA_ARGS__))(__VA_ARGS__)
 
 #define __syscall(...) __SYSCALL_DISP(__syscall,__VA_ARGS__)
+#undef syscall
 #define syscall(...) __syscall_ret(__syscall(__VA_ARGS__))
 
 #define socketcall(nm,a,b,c,d,e,f) __syscall_ret(__socketcall(nm,a,b,c,d,e,f))

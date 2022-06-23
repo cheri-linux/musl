@@ -6,6 +6,8 @@
 #include <stdarg.h>
 #include "syscall.h"
 
+#include "libc.h"
+
 static void dummy(void) { }
 weak_alias(dummy, __vm_wait);
 
@@ -13,6 +15,7 @@ void *__mremap(void *old_addr, size_t old_len, size_t new_len, int flags, ...)
 {
 	va_list ap;
 	void *new_addr = 0;
+	long addr;
 
 	if (new_len >= PTRDIFF_MAX) {
 		errno = ENOMEM;
@@ -26,7 +29,8 @@ void *__mremap(void *old_addr, size_t old_len, size_t new_len, int flags, ...)
 		va_end(ap);
 	}
 
-	return (void *)syscall(SYS_mremap, old_addr, old_len, new_len, flags, new_addr);
+	addr = syscall(SYS_mremap, old_addr, old_len, new_len, flags, new_addr);
+	return cast_to_ptr(void, addr, new_len);
 }
 
 weak_alias(__mremap, mremap);

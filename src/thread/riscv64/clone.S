@@ -7,6 +7,7 @@
 .global __clone
 .type  __clone, %function
 __clone:
+#ifndef __CHERI_PURE_CAPABILITY__
 	# Save func and arg to stack
 	addi a1, a1, -16
 	sd a0, 0(a1)
@@ -32,3 +33,30 @@ __clone:
 	# Exit
 	li a7, 93 # SYS_exit
 	ecall
+#else
+	# Save func and arg to stack
+	cincoffset ca1, ca1, -32
+	csc ca0, 0(ca1)
+	csc ca3, 16(ca1)
+
+	# Call SYS_clone
+	mv a0, a2
+	cmove ca2, ca4
+	cmove ca3, ca5
+	cmove ca4, ca6
+	li a7, 220 # SYS_clone
+	ecall
+
+	beqz a0, 1f
+	# Parent
+	cret
+
+	# Child
+1:      clc ca1, 0(csp)
+	clc ca0, 16(csp)
+	cjalr ca1
+
+	# Exit
+	li a7, 93 # SYS_exit
+	ecall
+#endif

@@ -12,12 +12,6 @@ hidden void __convert_scm_timestamps(struct msghdr *, socklen_t);
 
 int recvmmsg(int fd, struct mmsghdr *msgvec, unsigned int vlen, unsigned int flags, struct timespec *timeout)
 {
-#if LONG_MAX > INT_MAX
-	struct mmsghdr *mh = msgvec;
-	unsigned int i;
-	for (i = vlen; i; i--, mh++)
-		mh->msg_hdr.__pad1 = mh->msg_hdr.__pad2 = 0;
-#endif
 #ifdef SYS_recvmmsg_time64
 	time_t s = timeout ? timeout->tv_sec : 0;
 	long ns = timeout ? timeout->tv_nsec : 0;

@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
+#include <string.h>
 #include "syscall.h"
 #include "atomic.h"
 #include "libc.h"
@@ -20,16 +21,30 @@ weak_alias(dummy1, __init_ssp);
 #ifdef __GNUC__
 __attribute__((__noinline__))
 #endif
+#ifdef __CHERI_PURE_CAPABILITY__
+void __init_libc(__start_params_t *params)
+{
+	char *pn = params->argv[0];
+	char **envp = params->envp;
+	size_t *auxv = params->auxv;
+	size_t i;
+#else
 void __init_libc(char **envp, char *pn)
 {
-	size_t i, *auxv, aux[AUX_CNT] = { 0 };
-	__environ = envp;
+	size_t i;
 	for (i=0; envp[i]; i++);
-	libc.auxv = auxv = (void *)(envp+i+1);
+	size_t *auxv = (void *)(envp+i+1);
+#endif
+	size_t aux[AUX_CNT] = { 0 };
+	__environ = envp;
+	libc.auxv = auxv;
 	for (i=0; auxv[i]; i+=2) if (auxv[i]<AUX_CNT) aux[auxv[i]] = auxv[i+1];
 	__hwcap = aux[AT_HWCAP];
 	if (aux[AT_SYSINFO]) __sysinfo = aux[AT_SYSINFO];
 	libc.page_size = aux[AT_PAGESZ];
+
+	pr_debug("__init_libc: page_size=%d\n", libc.page_size);
+	pr_debug("__init_libc: auxv=%#lx\n", (long)auxv);
 
 	if (!pn) pn = (void*)aux[AT_EXECFN];
 	if (!pn) pn = "";
@@ -37,8 +52,9 @@ void __init_libc(char **envp, char *pn)
 	for (i=0; pn[i]; i++) if (pn[i]=='/') __progname = pn+i+1;
 
 	__init_tls(aux);
-	__init_ssp((void *)aux[AT_RANDOM]);
 
+	pr_debug("__init_libc: AT_RANDOM=%d, random=%#llx\n", AT_RANDOM, aux[AT_RANDOM]);
+	__init_ssp(cast_to_ptr(void, aux[AT_RANDOM], sizeof(uintptr_t)));
 	if (aux[AT_UID]==aux[AT_EUID] && aux[AT_GID]==aux[AT_EGID]
 		&& !aux[AT_SECURE]) return;
 
@@ -66,8 +82,26 @@ static void libc_start_init(void)
 
 weak_alias(libc_start_init, __libc_start_init);
 
-typedef int lsm2_fn(int (*)(int,char **,char **), int, char **);
+typedef int lsm2_fn(int (*)(int,char **,char **), int, char **, char **);
 static lsm2_fn libc_start_main_stage2;
+
+#ifdef __CHERI_PURE_CAPABILITY__
+
+int __libc_start_main(int (*main)(int,char **,char **), __start_params_t *params)
+{
+	/* External linkage, and explicit noinline attribute if available,
+	 * are used to prevent the stack frame used during init from
+	 * persisting for the entire process lifetime. */
+	__init_libc(params);
+
+	/* Barrier against hoisting application code or anything using ssp
+	 * or thread pointer prior to its initialization above. */
+	lsm2_fn *stage2 = libc_start_main_stage2;
+	__asm__ ( "" : "+C"(stage2) : : "memory" );
+	return stage2(main, params->argc, params->argv, params->envp);
+}
+
+#else
 
 int __libc_start_main(int (*main)(int,char **,char **), int argc, char **argv)
 {
@@ -82,15 +116,17 @@ int __libc_start_main(int (*main)(int,char **,char **), int argc, char **argv)
 	 * or thread pointer prior to its initialization above. */
 	lsm2_fn *stage2 = libc_start_main_stage2;
 	__asm__ ( "" : "+r"(stage2) : : "memory" );
-	return stage2(main, argc, argv);
+	return stage2(main, argc, argv, envp);
 }
 
-static int libc_start_main_stage2(int (*main)(int,char **,char **), int argc, char **argv)
+#endif
+
+static int libc_start_main_stage2(int (*main)(int,char **,char **), int argc, char **argv, char **envp)
 {
-	char **envp = argv+argc+1;
 	__libc_start_init();
 
 	/* Pass control to the application */
 	exit(main(argc, argv, envp));
 	return 0;
 }
+

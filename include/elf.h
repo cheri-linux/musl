@@ -1568,6 +1568,13 @@ typedef struct {
 #define R_MIPS_TLS_TPREL_HI16	49
 #define R_MIPS_TLS_TPREL_LO16	50
 #define R_MIPS_GLOB_DAT		51
+
+#define	R_MIPS_CHERI_ABSPTR	70
+#define	R_MIPS_CHERI_SIZE	71
+
+#define	R_MIPS_CHERI_CAPABILITY	90
+#define	R_MIPS_CHERI_CAPABILITY_CALL	91	/* Same as above but can be lazy */
+
 #define R_MIPS_COPY		126
 #define R_MIPS_JUMP_SLOT        127
 
@@ -1645,6 +1652,13 @@ typedef struct {
 #define DT_MIPS_RLD_MAP_REL  0x70000035
 #define DT_MIPS_NUM	     0x36
 
+#define DT_MIPS_CHERI___CAPRELOCS		0x7000c000 /* start of __cap_relocs section */
+#define DT_MIPS_CHERI___CAPRELOCSSZ		0x7000c001 /* size of __cap_relocs section */
+#define DT_MIPS_CHERI_FLAGS			0x7000c002 /* various CHERI flags (e.g. ABI) */
+#define DT_MIPS_CHERI_CAPTABLE			0x7000c003 /* start of .captable */
+#define DT_MIPS_CHERI_CAPTABLESZ		0x7000c004 /* size of .captable */
+#define DT_MIPS_CHERI_CAPTABLE_MAPPING		0x7000c005 /* start of .captable_mapping */
+#define DT_MIPS_CHERI_CAPTABLE_MAPPINGSZ	0x7000c006 /* size of .captable_mapping */
 
 
 #define RHF_NONE		   0
@@ -3283,6 +3297,8 @@ enum
 #define R_RISCV_SET16           55
 #define R_RISCV_SET32           56
 #define R_RISCV_32_PCREL        57
+
+#define R_RISCV_CHERI_CAPABILITY	193
 
 #ifdef __cplusplus
 }

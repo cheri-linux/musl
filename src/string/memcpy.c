@@ -1,6 +1,56 @@
 #include <string.h>
 #include <stdint.h>
 #include <endian.h>
+#include <stdio.h>
+
+#ifdef __CHERI_PURE_CAPABILITY__
+
+#include <cheric.h>
+
+#define __CAP_SIZE	(__CHERI_CAPABILITY_WIDTH__/8)
+
+void *memcpy(void *restrict dest, const void *restrict src, size_t n)
+{
+	unsigned char *d = dest;
+	const unsigned char *s = src;
+#if 0
+	pr_debug("memcpy_cheri: %lu\n", n);
+	pr_debug_cap("dest: ", dest);
+	pr_debug_cap("src: ", src);
+	pr_debug("reminder: %lu\n", (long)s % __CAP_SIZE);
+#endif
+	for (; (unsigned long)s % __CAP_SIZE && n; n--) *d++ = *s++;
+	if ((unsigned long)d % __CAP_SIZE == 0) {
+		// source and destination are aligned
+		for (; n >= __CAP_SIZE;  s += __CAP_SIZE, d += __CAP_SIZE, n -= __CAP_SIZE) {
+			*(void**)d = *(void**)s;
+			if (cheri_gettag(*(void**)s) && !cheri_gettag(*(void**)d))
+				__builtin_trap();
+		}
+	}
+	for (; n; n--) *d++ = *s++;
+	return dest;
+}
+
+void *memcpy_reverse(void *restrict dest, const void *restrict src, size_t n)
+{
+	unsigned char *d = dest;
+	const unsigned char *s = src;
+
+	for (d += n, s += n; (unsigned long)s % __CAP_SIZE && n; n--) *--d = *--s;
+	if ((unsigned long)d % __CAP_SIZE == 0) {
+		// source and destination are aligned
+		for (; n >= __CAP_SIZE;  n -= __CAP_SIZE) {
+			s -= __CAP_SIZE;
+			d -= __CAP_SIZE;
+			*(void**)d = *(void**)s;
+		}
+	}
+	for (; n; n--) *--d = *--s;
+	return dest;
+}
+
+#else
 
 void *memcpy(void *restrict dest, const void *restrict src, size_t n)
 {
@@ -122,3 +172,5 @@ void *memcpy(void *restrict dest, const void *restrict src, size_t n)
 	for (; n; n--) *d++ = *s++;
 	return dest;
 }
+#endif
+

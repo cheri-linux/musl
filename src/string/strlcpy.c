@@ -14,7 +14,8 @@ size_t strlcpy(char *d, const char *s, size_t n)
 	size_t *wd;
 
 	if (!n--) goto finish;
-#ifdef __GNUC__
+#if defined(__GNUC__) && !defined(__CHERI_PURE_CAPABILITY__) 
+//#ifdef __GNUC__
 	typedef size_t __attribute__((__may_alias__)) word;
 	const word *ws;
 	if (((uintptr_t)s & ALIGN) == ((uintptr_t)d & ALIGN)) {

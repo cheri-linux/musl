@@ -3,10 +3,22 @@
 #define __USE_TIME_BITS64 1
 
 TYPEDEF unsigned _Addr size_t;
-TYPEDEF unsigned _Addr uintptr_t;
+#ifndef __kptr_t
+#if defined( __CHERI_PURE_CAPABILITY__) && !defined(SYSCALL_PURECAP)
+#define __kptr_t long
+#else
+#define __kptr_t void*
+#endif
+#endif
 TYPEDEF _Addr ptrdiff_t;
 TYPEDEF _Addr ssize_t;
+#ifdef __CHERI_PURE_CAPABILITY__
+TYPEDEF __uintcap_t uintptr_t;
+TYPEDEF __intcap_t intptr_t;
+#else
+TYPEDEF unsigned _Addr uintptr_t;
 TYPEDEF _Addr intptr_t;
+#endif
 TYPEDEF _Addr regoff_t;
 TYPEDEF _Reg register_t;
 TYPEDEF _Int64 time_t;
@@ -76,6 +88,7 @@ TYPEDEF struct __locale_struct * locale_t;
 TYPEDEF struct __sigset_t { unsigned long __bits[128/sizeof(long)]; } sigset_t;
 
 STRUCT iovec { void *iov_base; size_t iov_len; };
+STRUCT kernel_iovec { size_t iov_base; size_t iov_len; };
 
 TYPEDEF unsigned socklen_t;
 TYPEDEF unsigned short sa_family_t;
@@ -83,8 +96,8 @@ TYPEDEF unsigned short sa_family_t;
 TYPEDEF struct { union { int __i[sizeof(long)==8?14:9]; volatile int __vi[sizeof(long)==8?14:9]; unsigned long __s[sizeof(long)==8?7:9]; } __u; } pthread_attr_t;
 TYPEDEF struct { union { int __i[sizeof(long)==8?10:6]; volatile int __vi[sizeof(long)==8?10:6]; volatile void *volatile __p[sizeof(long)==8?5:6]; } __u; } pthread_mutex_t;
 TYPEDEF struct { union { int __i[sizeof(long)==8?10:6]; volatile int __vi[sizeof(long)==8?10:6]; volatile void *volatile __p[sizeof(long)==8?5:6]; } __u; } mtx_t;
-TYPEDEF struct { union { int __i[12]; volatile int __vi[12]; void *__p[12*sizeof(int)/sizeof(void*)]; } __u; } pthread_cond_t;
-TYPEDEF struct { union { int __i[12]; volatile int __vi[12]; void *__p[12*sizeof(int)/sizeof(void*)]; } __u; } cnd_t;
+TYPEDEF struct { union { int __i[12]; volatile int __vi[12]; void *__p[12*sizeof(int)/sizeof(long)]; } __u; } pthread_cond_t;
+TYPEDEF struct { union { int __i[12]; volatile int __vi[12]; void *__p[12*sizeof(int)/sizeof(long)]; } __u; } cnd_t;
 TYPEDEF struct { union { int __i[sizeof(long)==8?14:8]; volatile int __vi[sizeof(long)==8?14:8]; void *__p[sizeof(long)==8?7:8]; } __u; } pthread_rwlock_t;
 TYPEDEF struct { union { int __i[sizeof(long)==8?8:5]; volatile int __vi[sizeof(long)==8?8:5]; void *__p[sizeof(long)==8?4:5]; } __u; } pthread_barrier_t;
 

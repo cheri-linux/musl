@@ -53,6 +53,7 @@ LDFLAGS_ALL = $(LDFLAGS_AUTO) $(LDFLAGS)
 
 AR      = $(CROSS_COMPILE)ar
 RANLIB  = $(CROSS_COMPILE)ranlib
+STRIP  = $(CROSS_COMPILE)strip
 INSTALL = $(srcdir)/tools/install.sh
 
 ARCH_INCLUDES = $(wildcard $(srcdir)/arch/$(ARCH)/bits/*.h)
@@ -160,6 +161,7 @@ obj/%.lo: $(srcdir)/%.c $(GENH) $(IMPH)
 lib/libc.so: $(LOBJS) $(LDSO_OBJS)
 	$(CC) $(CFLAGS_ALL) $(LDFLAGS_ALL) -nostdlib -shared \
 	-Wl,-e,_dlstart -o $@ $(LOBJS) $(LDSO_OBJS) $(LIBCC)
+	$(STRIP) --strip-debug -o $@.striped $@
 
 lib/libc.a: $(AOBJS)
 	rm -f $@

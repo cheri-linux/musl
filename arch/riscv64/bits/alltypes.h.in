@@ -2,6 +2,11 @@
 #define _Int64 long
 #define _Reg long
 
+#ifdef __CHERI_PURE_CAPABILITY__
+// riscv cap registers can be passed to hybrid kernel as is
+#define SYSCALL_PURECAP
+#endif
+
 #define __BYTE_ORDER 1234
 #define __LONG_MAX 0x7fffffffffffffffL
 

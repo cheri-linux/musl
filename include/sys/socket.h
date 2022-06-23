@@ -14,6 +14,7 @@ extern "C" {
 #define __NEED_pid_t
 #define __NEED_gid_t
 #define __NEED_struct_iovec
+#define __NEED_struct_kernel_iovec
 
 #include <bits/alltypes.h>
 
@@ -23,32 +24,14 @@ struct msghdr {
 	void *msg_name;
 	socklen_t msg_namelen;
 	struct iovec *msg_iov;
-#if __LONG_MAX > 0x7fffffff && __BYTE_ORDER == __BIG_ENDIAN
-	int __pad1;
-#endif
-	int msg_iovlen;
-#if __LONG_MAX > 0x7fffffff && __BYTE_ORDER == __LITTLE_ENDIAN
-	int __pad1;
-#endif
+	size_t msg_iovlen;
 	void *msg_control;
-#if __LONG_MAX > 0x7fffffff && __BYTE_ORDER == __BIG_ENDIAN
-	int __pad2;
-#endif
-	socklen_t msg_controllen;
-#if __LONG_MAX > 0x7fffffff && __BYTE_ORDER == __LITTLE_ENDIAN
-	int __pad2;
-#endif
+	size_t msg_controllen;
 	int msg_flags;
 };
 
 struct cmsghdr {
-#if __LONG_MAX > 0x7fffffff && __BYTE_ORDER == __BIG_ENDIAN
-	int __pad1;
-#endif
-	socklen_t cmsg_len;
-#if __LONG_MAX > 0x7fffffff && __BYTE_ORDER == __LITTLE_ENDIAN
-	int __pad1;
-#endif
+	size_t cmsg_len;
 	int cmsg_level;
 	int cmsg_type;
 };

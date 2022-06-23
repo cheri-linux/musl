@@ -1,3 +1,5 @@
+*.swp
+cscope.*
 *.o
 *.lo
 *.a

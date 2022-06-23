@@ -11,6 +11,11 @@ extern "C" {
 
 typedef struct __jmp_buf_tag {
 	__jmp_buf __jb;
+#ifdef __CHERI_PURE_CAPABILITY__
+#ifdef __mips
+	void* __caps[9 + 3];
+#endif
+#endif
 	unsigned long __fl;
 	unsigned long __ss[128/sizeof(long)];
 } jmp_buf[1];
